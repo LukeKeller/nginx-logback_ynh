@@ -3,18 +3,19 @@
 A tiny YunoHost app that echoes the metadata of any incoming request and shows
 the per-route nginx access/error logs.
 
-Hit **any** sub-route, with any method, and the response is a simple HTML page
-showing:
+Two behaviours:
 
-- request line: method, host, path, full URI, protocol, remote IP, user-agent
-- parsed query params
-- parsed POST / form params
-- decoded JSON body (when `Content-Type: application/json`) and the raw body
-- all request headers
-- the tail of this route's nginx `access.log` and `error.log`
+- **`/logs`** — shows the tail of this route's nginx `access.log` and
+  `error.log` (auto-refreshing).
+- **any other sub-route**, with any method — echoes the request back as a
+  simple HTML page showing: method, host, path, full URI, protocol, remote IP,
+  user-agent; parsed query params; parsed POST / form params; decoded JSON body
+  (when `Content-Type: application/json`) and the raw body; and all request
+  headers.
 
 Every request is also written to a dedicated log directory at
-`/var/log/nginx_logger/` (`access.log` + `error.log`), rotated weekly.
+`/var/log/nginx_logger/` (`access.log` + `error.log`), rotated weekly, which is
+what `/logs` displays.
 
 ## How it works
 

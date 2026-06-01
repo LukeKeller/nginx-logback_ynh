@@ -1,12 +1,16 @@
 <?php
-// Nginx Logger — echoes the metadata of the incoming request and shows the
-// tail of this route's nginx access/error logs.
-// Deployed by the YunoHost package; __APP__ is substituted at install time.
+// Nginx Logger.
+//   /logs        -> tail of this route's nginx access/error logs
+//   anything else -> echo the incoming request's metadata
+// __APP__ and __PATH__ are substituted by ynh_add_config at install time.
 
 $LOG_DIR    = '/var/log/__APP__';
 $ACCESS_LOG = $LOG_DIR . '/access.log';
 $ERROR_LOG  = $LOG_DIR . '/error.log';
-$TAIL_LINES = 50;
+$TAIL_LINES = 100;
+
+// Mount point of the app (e.g. "" for a root install, "/foo" for a sub-path).
+$BASE = rtrim('__PATH__', '/');
 
 function h($s) {
     return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -39,43 +43,6 @@ function tail_file($path, $lines) {
     return array_slice($arr, -$lines);
 }
 
-// --- Gather request metadata -------------------------------------------------
-$method   = $_SERVER['REQUEST_METHOD']  ?? '-';
-$uri      = $_SERVER['REQUEST_URI']     ?? '-';
-$proto    = $_SERVER['SERVER_PROTOCOL'] ?? '-';
-$host     = $_SERVER['HTTP_HOST']       ?? '-';
-$remote   = $_SERVER['REMOTE_ADDR']     ?? '-';
-$ua       = $_SERVER['HTTP_USER_AGENT'] ?? '-';
-$path     = parse_url($uri, PHP_URL_PATH) ?? '-';
-
-// Query params
-parse_str($_SERVER['QUERY_STRING'] ?? '', $query);
-
-// Body / POST params
-$rawBody = file_get_contents('php://input');
-$postParams = $_POST;
-$contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-// If JSON body, try to decode for display
-$jsonBody = null;
-if ($rawBody !== '' && stripos($contentType, 'application/json') !== false) {
-    $decoded = json_decode($rawBody, true);
-    if (json_last_error() === JSON_ERROR_NONE) {
-        $jsonBody = $decoded;
-    }
-}
-
-// Request headers
-$headers = array();
-foreach ($_SERVER as $k => $v) {
-    if (strpos($k, 'HTTP_') === 0) {
-        $name = str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($k, 5)))));
-        $headers[$name] = $v;
-    }
-}
-if (isset($_SERVER['CONTENT_TYPE']))   $headers['Content-Type']   = $_SERVER['CONTENT_TYPE'];
-if (isset($_SERVER['CONTENT_LENGTH'])) $headers['Content-Length'] = $_SERVER['CONTENT_LENGTH'];
-ksort($headers);
-
 function kv_table($rows) {
     if (empty($rows)) {
         return '<p class="empty">(none)</p>';
@@ -91,16 +58,29 @@ function kv_table($rows) {
     return $out;
 }
 
-$accessTail = tail_file($ACCESS_LOG, $TAIL_LINES);
-$errorTail  = tail_file($ERROR_LOG, $TAIL_LINES);
-?>
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>nginx-logger — <?= h($method) ?> <?= h($path) ?></title>
-<style>
+function render_log($title, $tail, $n) {
+    $out = '<section class="logs"><h2>' . h($title) . ' (last ' . (int)$n . ')</h2><div class="body">';
+    if ($tail === null) {
+        $out .= '<p class="empty">(log not readable yet)</p>';
+    } elseif (empty($tail)) {
+        $out .= '<p class="empty">(empty)</p>';
+    } else {
+        $out .= '<pre>' . h(implode("\n", array_reverse($tail))) . '</pre>';
+    }
+    return $out . '</div></section>';
+}
+
+// --- Routing -----------------------------------------------------------------
+$reqUri  = $_SERVER['REQUEST_URI'] ?? '/';
+$reqPath = parse_url($reqUri, PHP_URL_PATH);
+$reqPath = $reqPath === null ? '/' : $reqPath;
+$rel     = substr($reqPath, strlen($BASE));      // strip mount prefix
+$rel     = '/' . ltrim($rel, '/');
+$isLogs  = ($rel === '/logs' || $rel === '/logs/');
+
+$logsUrl = ($BASE === '' ? '' : $BASE) . '/logs';
+
+$css = <<<'CSS'
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
@@ -130,14 +110,85 @@ $errorTail  = tail_file($ERROR_LOG, $TAIL_LINES);
     display: inline-block; padding: .1rem .5rem; border-radius: 4px;
     background: #1f6feb; color: #fff; font-weight: 700; margin-right: .4rem;
   }
-  .logs pre { font-size: 12px; color: #8b949e; max-height: 320px; overflow: auto; }
+  .logs pre { font-size: 12px; color: #8b949e; max-height: 480px; overflow: auto; }
   footer { color: #6e7681; margin-top: 1rem; font-size: 12px; }
   a { color: #58a6ff; }
-</style>
+CSS;
+
+// =============================================================================
+// /logs  -> log viewer
+// =============================================================================
+if ($isLogs) {
+    $accessTail = tail_file($ACCESS_LOG, $TAIL_LINES);
+    $errorTail  = tail_file($ERROR_LOG, $TAIL_LINES);
+    ?>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="5">
+<title>nginx-logger — logs</title>
+<style><?= $css ?></style>
 </head>
 <body>
 <div class="wrap">
-  <h1><span class="badge"><?= h($method) ?></span><?= h($uri) ?></h1>
+  <h1>nginx logs</h1>
+  <p class="sub">access &amp; error logs for this route &middot; auto-refresh 5s &middot; <?= h(gmdate('Y-m-d H:i:s')) ?> UTC</p>
+  <?= render_log('access log', $accessTail, $TAIL_LINES) ?>
+  <?= render_log('error log', $errorTail, $TAIL_LINES) ?>
+  <footer>Every other route echoes its own request metadata.</footer>
+</div>
+</body>
+</html>
+<?php
+    exit;
+}
+
+// =============================================================================
+// anything else -> echo the request
+// =============================================================================
+$method = $_SERVER['REQUEST_METHOD']  ?? '-';
+$proto  = $_SERVER['SERVER_PROTOCOL'] ?? '-';
+$host   = $_SERVER['HTTP_HOST']       ?? '-';
+$remote = $_SERVER['REMOTE_ADDR']     ?? '-';
+$ua     = $_SERVER['HTTP_USER_AGENT'] ?? '-';
+
+parse_str($_SERVER['QUERY_STRING'] ?? '', $query);
+
+$rawBody     = file_get_contents('php://input');
+$postParams  = $_POST;
+$contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+$jsonBody    = null;
+if ($rawBody !== '' && stripos($contentType, 'application/json') !== false) {
+    $decoded = json_decode($rawBody, true);
+    if (json_last_error() === JSON_ERROR_NONE) {
+        $jsonBody = $decoded;
+    }
+}
+
+$headers = array();
+foreach ($_SERVER as $k => $v) {
+    if (strpos($k, 'HTTP_') === 0) {
+        $name = str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($k, 5)))));
+        $headers[$name] = $v;
+    }
+}
+if (isset($_SERVER['CONTENT_TYPE']))   $headers['Content-Type']   = $_SERVER['CONTENT_TYPE'];
+if (isset($_SERVER['CONTENT_LENGTH'])) $headers['Content-Length'] = $_SERVER['CONTENT_LENGTH'];
+ksort($headers);
+?>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nginx-logger — <?= h($method) ?> <?= h($reqPath) ?></title>
+<style><?= $css ?></style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="badge"><?= h($method) ?></span><?= h($reqUri) ?></h1>
   <p class="sub"><?= h($proto) ?> &middot; <?= h(gmdate('Y-m-d H:i:s')) ?> UTC &middot; from <?= h($remote) ?></p>
 
   <section>
@@ -145,8 +196,8 @@ $errorTail  = tail_file($ERROR_LOG, $TAIL_LINES);
     <div class="body"><?= kv_table(array(
         'Method'     => $method,
         'Host'       => $host,
-        'Path'       => $path,
-        'Full URI'   => $uri,
+        'Path'       => $reqPath,
+        'Full URI'   => $reqUri,
         'Protocol'   => $proto,
         'Remote IP'  => $remote,
         'User-Agent' => $ua,
@@ -180,33 +231,7 @@ $errorTail  = tail_file($ERROR_LOG, $TAIL_LINES);
     <div class="body"><?= kv_table($headers) ?></div>
   </section>
 
-  <section class="logs">
-    <h2>nginx access log (last <?= (int)$TAIL_LINES ?>)</h2>
-    <div class="body"><?php
-      if ($accessTail === null) {
-          echo '<p class="empty">(log not readable yet)</p>';
-      } elseif (empty($accessTail)) {
-          echo '<p class="empty">(empty)</p>';
-      } else {
-          echo '<pre>' . h(implode("\n", array_reverse($accessTail))) . '</pre>';
-      }
-    ?></div>
-  </section>
-
-  <section class="logs">
-    <h2>nginx error log (last <?= (int)$TAIL_LINES ?>)</h2>
-    <div class="body"><?php
-      if ($errorTail === null) {
-          echo '<p class="empty">(log not readable yet)</p>';
-      } elseif (empty($errorTail)) {
-          echo '<p class="empty">(empty)</p>';
-      } else {
-          echo '<pre>' . h(implode("\n", array_reverse($errorTail))) . '</pre>';
-      }
-    ?></div>
-  </section>
-
-  <footer>nginx-logger &middot; every request to any sub-route is echoed here and written to the logs above.</footer>
+  <footer>This request was logged. View the nginx logs for this route at <a href="<?= h($logsUrl) ?>"><?= h($logsUrl) ?></a>.</footer>
 </div>
 </body>
 </html>
