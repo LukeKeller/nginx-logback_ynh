@@ -58,6 +58,19 @@ function kv_table($rows) {
     return $out;
 }
 
+// True if an access-log line is a request to the given path (e.g. the /logs
+// page polling itself on auto-refresh).
+function is_request_to($line, $path) {
+    if (preg_match('#"[A-Z]+\s+(\S+)\s+HTTP/#', $line, $m)) {
+        $p = parse_url($m[1], PHP_URL_PATH);
+        if ($p === null) {
+            return false;
+        }
+        return rtrim($p, '/') === rtrim($path, '/');
+    }
+    return false;
+}
+
 function render_log($title, $tail, $n) {
     $out = '<section class="logs"><h2>' . h($title) . ' (last ' . (int)$n . ')</h2><div class="body">';
     if ($tail === null) {
@@ -119,8 +132,21 @@ CSS;
 // /logs  -> log viewer
 // =============================================================================
 if ($isLogs) {
-    $accessTail = tail_file($ACCESS_LOG, $TAIL_LINES);
+    // Show /logs self-refresh hits only when explicitly asked (?all=1).
+    $showAll = !empty($_GET['all']);
+
+    // Read extra so that, after filtering, we still have ~$TAIL_LINES to show.
+    $accessRaw = tail_file($ACCESS_LOG, $showAll ? $TAIL_LINES : $TAIL_LINES * 5);
+    if ($accessRaw !== null && !$showAll) {
+        $accessRaw = array_values(array_filter($accessRaw, function ($l) use ($logsUrl) {
+            return !is_request_to($l, $logsUrl);
+        }));
+    }
+    $accessTail = $accessRaw === null ? null : array_slice($accessRaw, -$TAIL_LINES);
     $errorTail  = tail_file($ERROR_LOG, $TAIL_LINES);
+
+    $toggleUrl   = $showAll ? $logsUrl : ($logsUrl . '?all=1');
+    $toggleLabel = $showAll ? 'hide /logs requests' : 'show /logs requests';
     ?>
 <!doctype html>
 <html lang="en">
@@ -134,7 +160,9 @@ if ($isLogs) {
 <body>
 <div class="wrap">
   <h1>nginx logs</h1>
-  <p class="sub">access &amp; error logs for this route &middot; auto-refresh 5s &middot; <?= h(gmdate('Y-m-d H:i:s')) ?> UTC</p>
+  <p class="sub">access &amp; error logs for this route &middot; auto-refresh 5s &middot; <?= h(gmdate('Y-m-d H:i:s')) ?> UTC<br>
+    <?= $showAll ? 'showing all requests' : 'hiding this page&rsquo;s own refresh requests' ?> &middot;
+    <a href="<?= h($toggleUrl) ?>"><?= h($toggleLabel) ?></a></p>
   <?= render_log('access log', $accessTail, $TAIL_LINES) ?>
   <?= render_log('error log', $errorTail, $TAIL_LINES) ?>
   <footer>Every other route echoes its own request metadata.</footer>
