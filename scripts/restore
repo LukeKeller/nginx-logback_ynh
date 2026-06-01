@@ -1,0 +1,37 @@
+#!/bin/bash
+
+source ../settings/scripts/_common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# RESTORE THE APP FILES
+#=================================================
+ynh_script_progression --message="Restoring the app files..." --weight=1
+
+ynh_restore_file --origin_path="$install_dir"
+chown -R "$app:www-data" "$install_dir"
+
+#=================================================
+# RESTORE THE LOG DIRECTORY
+#=================================================
+ynh_script_progression --message="Restoring the log directory..." --weight=1
+
+setup_log_dir
+
+#=================================================
+# RESTORE SYSTEM CONFIGURATIONS
+#=================================================
+ynh_script_progression --message="Restoring system configurations related to $app..." --weight=1
+
+ynh_restore_file --origin_path="/etc/php/$phpversion/fpm/pool.d/$app.conf"
+ynh_systemd_action --service_name="php$phpversion-fpm" --action=reload
+
+ynh_restore_file --origin_path="/etc/nginx/conf.d/$domain.d/$app.conf"
+ynh_restore_file --origin_path="/etc/logrotate.d/$app"
+
+ynh_systemd_action --service_name=nginx --action=reload
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression --message="Restoration completed for $app" --last

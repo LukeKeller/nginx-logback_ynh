@@ -1,0 +1,33 @@
+#!/bin/bash
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# UPDATE APP FILES
+#=================================================
+ynh_script_progression --message="Updating the echo page..." --weight=1
+
+ynh_add_config --template="index.php" --destination="$install_dir/index.php"
+
+#=================================================
+# ENSURE LOG DIRECTORY
+#=================================================
+ynh_script_progression --message="Ensuring the log directory..." --weight=1
+
+setup_log_dir
+
+#=================================================
+# SYSTEM CONFIGURATION
+#=================================================
+ynh_script_progression --message="Updating system configurations related to $app..." --weight=1
+
+ynh_add_fpm_config
+ynh_add_nginx_config
+
+ynh_add_config --template="logrotate" --destination="/etc/logrotate.d/$app"
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression --message="Upgrade of $app completed" --last
