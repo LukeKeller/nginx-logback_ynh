@@ -29,7 +29,7 @@ Every request is also written to a dedicated log directory at
 This app is not in the YunoHost catalogue; install it straight from this repo.
 
 ```bash
-sudo yunohost app install https://github.com/LukeKeller/nginx-logback \
+sudo yunohost app install https://github.com/LukeKeller/nginx-logback_ynh \
   --args "domain=nginx-logs.p10.club&path=/&init_main_permission=visitors"
 ```
 
@@ -46,7 +46,7 @@ Then browse to <https://nginx-logs.p10.club/> (or POST to any sub-route such as
 ## Upgrade / remove
 
 ```bash
-sudo yunohost app upgrade nginx_logger -u https://github.com/LukeKeller/nginx-logback
+sudo yunohost app upgrade nginx_logger -u https://github.com/LukeKeller/nginx-logback_ynh
 sudo yunohost app remove  nginx_logger
 ```
 
