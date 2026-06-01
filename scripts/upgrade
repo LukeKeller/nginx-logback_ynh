@@ -10,6 +10,9 @@ ynh_script_progression --message="Updating the echo page..." --weight=1
 
 ynh_add_config --template="index.php" --destination="$install_dir/index.php"
 
+# nginx (www-data) must be able to traverse the install dir to stat index.php.
+chown -R "$app:www-data" "$install_dir"
+
 #=================================================
 # ENSURE LOG DIRECTORY
 #=================================================
